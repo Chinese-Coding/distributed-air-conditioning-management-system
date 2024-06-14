@@ -1,0 +1,16 @@
+{
+  "HEATING_TEMP": [
+    2500,
+    3000
+  ],
+  "REFRIGERATION_TEMP": [
+    1800,
+    2500
+  ],
+  "FAX_COST": {
+    "SLOW": 0.8,
+    "MEDDLE": 1.0,
+    "FAST": 1.2
+  },
+  "EXPIRY_DURATION": 6
+}

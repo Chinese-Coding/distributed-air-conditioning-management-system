@@ -1,0 +1,25 @@
+spring:
+    application:
+        name: master
+    datasource:
+        url: jdbc:postgresql://localhost:5432/air_conditioner_system
+        username: root
+        password: root
+        driver-class-name: org.postgresql.Driver
+    jpa:
+        hibernate:
+            naming:
+                physical-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
+            ddl-auto: none
+        show-sql: false
+
+    # 启动虚拟线程的支持
+    threads:
+        virtual:
+            enabled: true
+master:
+    fixedRate: 1000
+    pollingInterval: 500
+
+slave:
+    defaultTemp: 2200
