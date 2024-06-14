@@ -104,16 +104,15 @@ class SlaveController {
      * 接收从机请求, 从机给出的每个参数都不应为 null
      * <p>
      * TODO: 可以直接将参数改为 RequestData 类型，利用Kotlin数据类的验证特性校验参数
-     * TODO: 废弃旧有的 /OnSlaverPower 请求 url
      */
     @CheckLogin
     @CheckWorkMode
-    @PostMapping(value = ["/OnSlaverPower", "/slaveRequest"])
+    @PostMapping("/slaveRequest")
     fun slaveRequest(
         @NotNull roomId: Long, @NotNull setTemp: Int,
         @NotNull curTemp: Int, @NotBlank mode: String
     ): R<String> {
-        logger.info("从机请求参数: {}, {}, {}, {}", roomId, setTemp, curTemp, mode);
+        logger.info("从机请求参数: {}, {}, {}, {}", roomId, setTemp, curTemp, mode)
 
         val requestDetail = RequestDetail(id = roomId, stopTemp = setTemp, startTemp = curTemp, fanSpeed = mode)
         // 收到从机的新请求时, 记得也要更新一下从机能量和费用

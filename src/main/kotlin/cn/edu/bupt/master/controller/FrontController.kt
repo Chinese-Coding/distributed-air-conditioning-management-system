@@ -78,10 +78,8 @@ class FrontController {
 
     /**
      * 获取主机工作状态
-     *
-     * TODO: 删除 `/getWorkMode` url, 因为此 url 中 K 意外大写了
      */
-    @GetMapping(value = ["/getWorkMode", "/getWorKMode"])
+    @GetMapping("/getWorkMode")
     fun getWorkMode(): R<String> {
         return R.success(masterService.workMode.toString())
     }
