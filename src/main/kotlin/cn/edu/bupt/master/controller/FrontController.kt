@@ -54,8 +54,8 @@ class FrontController {
     }
 
     @CheckWorkMode
-    @PostMapping("/setWorkMode")
-    fun setWorkMode(@NotBlank workMode: String): R<String> {
+    @PostMapping("/workMode")
+    fun workMode(@NotBlank workMode: String): R<String> {
         logger.info("设置主机工作模式: {}", workMode)
         masterService
         if (workMode == "HEATING")
@@ -68,8 +68,8 @@ class FrontController {
     }
 
     @CheckWorkMode
-    @PostMapping("/setRange")
-    fun setRange(@NotNull firstValue: Int, @NotNull secondValue: Int): R<String> {
+    @PostMapping("/range")
+    fun range(@NotNull firstValue: Int, @NotNull secondValue: Int): R<String> {
         logger.info("主机工作的温度范围: {}, {}", firstValue * 100, secondValue * 100)
         val range = listOf(firstValue * 100, secondValue * 100)
         masterService.range = range
@@ -79,17 +79,16 @@ class FrontController {
     /**
      * 获取主机工作状态
      */
-    @GetMapping("/getWorkMode")
-    fun getWorkMode(): R<String> {
-        return R.success(masterService.workMode.toString())
-    }
+    @GetMapping("/workMode")
+    fun workMode() = R.success(masterService.workMode.toString())
+
 
     /**
      * 获取主机工作状态和温度, 主机前端和从机后端共用的函数
      */
     @CheckWorkMode
-    @GetMapping("/getWorkStatus")
-    fun getWorkStatus(): R<Any> {
+    @GetMapping("/workStatus")
+    fun workStatus(): R<Any> {
         val r = object {
             val workMode = masterService.workMode
             val range = masterService.range
@@ -101,8 +100,8 @@ class FrontController {
      * 获取从机状态列表
      */
     @CheckWorkMode
-    @GetMapping("/getSlaveStatus")
-    fun getSlaveStatus(): R<List<SlaveStatus>> {
+    @GetMapping("/slaveStatus")
+    fun slaveStatus(): R<List<SlaveStatus>> {
         val list = slaveStatusService.getSlaveStatusList()
         return if (list.isNotEmpty()) {
             list.forEach { slaveStatus ->
@@ -120,8 +119,8 @@ class FrontController {
      * 获取房间报表
      */
     @CheckWorkMode
-    @GetMapping("/getRoomTable")
-    fun getRoomTable(@NotNull roomId: Long): R<List<Request>> {
+    @GetMapping("/roomTable")
+    fun roomTable(@NotNull roomId: Long): R<List<Request>> {
         val list = requestService.findAllByRoomId(roomId)
         return if (list.isNotEmpty()) R.success(list) else R.error("没有该房间报表！")
     }
@@ -130,8 +129,8 @@ class FrontController {
      * 按年月日获取报表
      */
     @CheckWorkMode
-    @GetMapping("/getTable")
-    fun getTable(@NotNull period: String): R<out Any> {
+    @GetMapping("/table")
+    fun table(@NotNull period: String): R<out Any> {
         return try {
             if (period.isEmpty()) {
                 R.error("参数错误")

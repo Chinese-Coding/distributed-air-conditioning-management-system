@@ -9,8 +9,7 @@
   ],
   "FAX_COST": {
     "SLOW": 0.8,
-    "MEDDLE": 1.0,
+    "MIDDLE": 1.0,
     "FAST": 1.2
-  },
-  "EXPIRY_DURATION": 6
+  }
 }

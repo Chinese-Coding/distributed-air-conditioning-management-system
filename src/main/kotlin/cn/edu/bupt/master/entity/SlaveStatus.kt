@@ -1,4 +1,4 @@
-package cn.edu.bupt.master.entity;
+package cn.edu.bupt.master.entity
 
 import java.math.BigDecimal
 import java.time.LocalDateTime
@@ -12,7 +12,7 @@ data class SlaveStatus(
 
     var status: Status? = null,
 
-    var mode: String? = null,
+    var fanSpeed: String? = null,
 
     var wind: String? = null,
 

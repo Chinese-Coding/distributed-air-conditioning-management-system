@@ -5,13 +5,13 @@ import cn.edu.bupt.master.entity.SlaveStatus
 import cn.edu.bupt.master.entity.Status
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
 import java.util.concurrent.ConcurrentHashMap
-import cn.edu.bupt.master.EXPIRY_DURATION
 
 @Service
 class SlaveStatusService {
@@ -23,6 +23,8 @@ class SlaveStatusService {
     @Autowired
     private lateinit var roomRepository: RoomRepository
 
+    @Value("\${master.EXPIRY_DURATION}")
+    private lateinit var EXPIRY_DURATION: String
 
     private var slaveStatusMap = ConcurrentHashMap<Long, SlaveStatus>()
 
@@ -54,14 +56,6 @@ class SlaveStatusService {
     fun isRegistered(roomId: Long) = slaveStatusMap.containsKey(roomId)
 
 
-    fun updateRegisteredTime(roomId: Long) {
-        if (slaveStatusMap.containsKey(roomId)) {
-            var slaveStatus = slaveStatusMap[roomId]!!
-            slaveStatus.registeredTime = LocalDateTime.now()
-            slaveStatusMap.put(roomId, slaveStatus);
-        }
-    }
-
     fun updateEnergyAndFee(roomId: Long, energy: BigDecimal, fee: BigDecimal) {
         if (slaveStatusMap.containsKey(roomId)) {
             var slaveStatus = slaveStatusMap[roomId]!!
@@ -70,14 +64,14 @@ class SlaveStatusService {
             slaveStatus.registeredTime = LocalDateTime.now()
             if (TEST)
                 logger.info("更新从机({}), 当前历史能量和费用为: {}, {}", roomId, slaveStatus.energy, slaveStatus.fee)
-            slaveStatusMap.put(roomId, slaveStatus);
+            slaveStatusMap.put(roomId, slaveStatus)
         }
     }
 
     /**
      * 更新除去能量和费用以外的其他参数
      */
-    fun updateSlaveStatus(roomId: Long, curTemp: Int, setTemp: Int, status: Status, mode: String) {
+    fun updateSlaveStatus(roomId: Long, curTemp: Int, setTemp: Int, status: Status, fanSpeed: String) {
         if (isRegistered(roomId)) {
             // 如果存在则直接更新该对象
             val slaveStatus = slaveStatusMap[roomId]!!
@@ -85,7 +79,7 @@ class SlaveStatusService {
                 this.curTemp = curTemp
                 this.setTemp = setTemp
                 this.status = status
-                this.mode = mode
+                this.fanSpeed = fanSpeed
                 this.registeredTime = LocalDateTime.now()
             }
             slaveStatusMap[roomId] = slaveStatus
@@ -114,7 +108,7 @@ class SlaveStatusService {
             if (entry.value.status == Status.离线)
                 continue
 
-            if (ChronoUnit.SECONDS.between(entry.value.registeredTime, now) > EXPIRY_DURATION) {
+            if (ChronoUnit.SECONDS.between(entry.value.registeredTime, now) > EXPIRY_DURATION.toInt()) {
                 val roomId = entry.key
                 if (entry.value.status == Status.关机) {
                     iterator.remove()
@@ -134,6 +128,4 @@ class SlaveStatusService {
         }
 
     }
-
-
 }

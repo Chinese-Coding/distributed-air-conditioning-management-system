@@ -3,17 +3,58 @@ package cn.edu.bupt.master.service
 import cn.edu.bupt.master.entity.Request
 import cn.edu.bupt.master.entity.RequestDetail
 import cn.edu.bupt.master.entity.WorkMode
+import com.fasterxml.jackson.databind.JsonMappingException
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import jakarta.annotation.Resource
 import org.slf4j.LoggerFactory
+import org.springframework.boot.json.JsonParseException
+import org.springframework.core.io.ClassPathResource
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
+import java.io.IOException
 import java.math.BigDecimal
+import java.time.Duration
 import java.time.LocalDateTime
 import java.util.Collections
 import java.util.LinkedList
 import java.util.concurrent.ConcurrentHashMap
-import cn.edu.bupt.master.*
-import java.time.Duration
+import kotlin.system.exitProcess
+
+private lateinit var HEATING_TEMP: List<Int>
+private lateinit var REFRIGERATION_TEMP: List<Int>
+private lateinit var FAX_COST: Map<String, Double>
+private var EXPIRY_DURATION: Int = 0
+
+fun init() {
+    data class BasicData(
+        val HEATING_TEMP: List<Int>,
+        val REFRIGERATION_TEMP: List<Int>,
+        val FAX_COST: Map<String, Double>,
+        val EXPIRY_DURATION: Int
+    )
+
+    // 读取 JSON 文件
+    val mapper = jacksonObjectMapper()
+    val resource = ClassPathResource("config.json")
+    val basicData = try {
+        resource.inputStream.use {
+            mapper.readValue(it, BasicData::class.java)
+        }
+    } catch (e: JsonParseException) {
+        System.err.println("JSON 解析错误: ${e.message}")
+        exitProcess(0)
+    } catch (e: JsonMappingException) {
+        System.err.println("JSON 映射错误: ${e.message}")
+        exitProcess(0)
+    } catch (e: IOException) {
+        System.err.println("文件读取错误: ${e.message}")
+        exitProcess(0)
+    }
+    HEATING_TEMP = basicData.HEATING_TEMP
+    REFRIGERATION_TEMP = basicData.REFRIGERATION_TEMP
+    FAX_COST = basicData.FAX_COST
+    EXPIRY_DURATION = basicData.EXPIRY_DURATION
+}
 
 @Service
 class MasterService {
@@ -50,7 +91,6 @@ class MasterService {
     fun checkWorkMode(workMode: WorkMode) = this.workMode == workMode
 
 
-
     fun powerOn() {
         if (workMode != WorkMode.OFF)
             return
@@ -60,7 +100,7 @@ class MasterService {
         this.requestList = Collections.synchronizedList(LinkedList())
         this.requestDetailMap = ConcurrentHashMap()
         this.sendAirRoomId = Collections.synchronizedSet(HashSet())
-        logger.info("主机启动成功! 主机工作参数: {}, {}, {}", workMode, range, FAX_COST);
+        logger.info("主机启动成功! 主机工作参数: {}, {}, {}", workMode, range, FAX_COST)
     }
 
     fun powerOff() {
@@ -79,7 +119,11 @@ class MasterService {
             }
             requestService.save(request)
         }
-        requestList.clear() // 其实加不加都无所谓
+        // 其实加不加都无所谓
+        requestList.clear()
+        requestDetailMap.clear()
+        sendAirRoomId.clear()
+
         logger.info("主机关闭成功!")
     }
 
@@ -89,10 +133,10 @@ class MasterService {
 
         // 检查设定温度是否在范围内
         if (stopTemp!! > range[1] || stopTemp < range[0])
-            return false;
+            return false
         // 根据工作模式比较起始温度和停止温度
         return (workMode == WorkMode.HEATING && startTemp!! < stopTemp) ||
-                (workMode == WorkMode.REFRIGERATION && startTemp!! > stopTemp);
+                (workMode == WorkMode.REFRIGERATION && startTemp!! > stopTemp)
     }
 
     /**
@@ -113,7 +157,7 @@ class MasterService {
     /**
      * 计算一个请求的总花费并写入数据库
      *
-     * @param request 请求
+     * @param requestDetail 请求
      * @return 返回一个包含 energy, fee 的 list
      */
     private fun calcFeeAndSave(requestDetail: RequestDetail): List<BigDecimal> {
@@ -174,6 +218,7 @@ class MasterService {
                     this.stopTime = LocalDateTime.now()
                     this.stopTemp = newRequestDetail.startTemp
                 }
+                requestDetailMap.put(requestId, newRequestDetail)
                 return calcFeeAndSave(oldRequestDetail)
             } else { // 如果原先的那个新请求的参数不合法, 则还是处理原先的那个请求
                 requestDetailMap.put(requestId, oldRequestDetail)
@@ -262,7 +307,7 @@ class MasterService {
             return
 
         // 每次添加之前记得清零......
-        sendAirRoomId.clear();
+        sendAirRoomId.clear()
         var size = requestList.size
         if (size == 0)
             return

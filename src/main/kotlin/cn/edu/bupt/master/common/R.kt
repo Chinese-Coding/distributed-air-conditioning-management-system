@@ -1,7 +1,6 @@
 package cn.edu.bupt.master.common
 
 import com.fasterxml.jackson.annotation.JsonProperty
-import java.util.HashMap
 
 /**
  * 统一返回结果
@@ -21,7 +20,7 @@ class R<T> {
     private var data: T? = null
 
     @JsonProperty("map")
-    private var map = HashMap<Any, Any>()
+    private var map = mutableMapOf<String, Any>()
 
     fun add(key: String, value: Any): R<T> {
         this.map.put(key, value)

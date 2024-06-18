@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.validation.annotation.Validated
 import org.springframework.web.bind.annotation.DeleteMapping
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
@@ -49,7 +50,7 @@ class SlaveController {
      * @return 登录成功后返回从机默认工作温度, 否则返回错误信息
      */
     @CheckWorkMode
-    @PostMapping("/slave-login")
+    @PostMapping("/login")
     fun login(@NotNull name: String, password: String?, @NotNull roomId: Long): R<Int> {
         logger.info("从机请求登录({}, name={}, password={})", roomId, name, password)
         val r = if (password == null)
@@ -83,7 +84,7 @@ class SlaveController {
      */
     @CheckLogin
     @CheckWorkMode
-    @PostMapping("/slave-logout")
+    @PostMapping("/logout")
     fun logout(@NotNull roomId: Long): R<String> {
         val room = roomService.findById(roomId)
         if (room == null)
@@ -107,14 +108,14 @@ class SlaveController {
      */
     @CheckLogin
     @CheckWorkMode
-    @PostMapping("/slaveRequest")
-    fun slaveRequest(
+    @PostMapping("/request")
+    fun request(
         @NotNull roomId: Long, @NotNull setTemp: Int,
-        @NotNull curTemp: Int, @NotBlank mode: String
+        @NotNull curTemp: Int, @NotBlank fanSpeed: String
     ): R<String> {
-        logger.info("从机请求参数: {}, {}, {}, {}", roomId, setTemp, curTemp, mode)
+        logger.info("从机请求参数: {}, {}, {}, {}", roomId, setTemp, curTemp, fanSpeed)
 
-        val requestDetail = RequestDetail(id = roomId, stopTemp = setTemp, startTemp = curTemp, fanSpeed = mode)
+        val requestDetail = RequestDetail(id = roomId, stopTemp = setTemp, startTemp = curTemp, fanSpeed = fanSpeed)
         // 收到从机的新请求时, 记得也要更新一下从机能量和费用
         val energyAndFee = masterService.slaveRequest(roomId, requestDetail)
         return if (energyAndFee != null) {
@@ -128,18 +129,15 @@ class SlaveController {
 
     /**
      * 从机暂停送风
-     * TODO: 废弃旧有的 /OffSlaverPower 请求 url
      */
     @CheckLogin
     @CheckWorkMode
-    @PostMapping("/OffSlaverPower")
-    @DeleteMapping("/slaveRequest")
-    fun slaveRequest(@NotNull roomId: Long): R<Boolean> {
+    @DeleteMapping("/request")
+    fun request(@NotNull roomId: Long): R<Boolean> {
         logger.info("从机请求关闭: {}", roomId)
         val energyAndFee = masterService.slavePowerOff(roomId)
         if (energyAndFee != null) {
             slaveStatusService.updateEnergyAndFee(roomId, energyAndFee[0], energyAndFee[1])
-            slaveStatusService.updateRegisteredTime(roomId)
             return R.success(true)
         }
         return R.success(false)
@@ -151,18 +149,21 @@ class SlaveController {
      * @param roomId 从机的 roomId
      * @param setTemp 设定温度
      * @param curTemp 当前温度
-     * @param mode 运行模式
+     * @param fanSpeed 运行模式
      * @return 如果在返回 true, 如果不在返回 false
      */
     @CheckLogin
     @CheckWorkMode
-    @PostMapping("/sendAir")
-    fun sendAir(
+    @PostMapping("/wind")
+    fun wind(
         @NotNull roomId: Long, @NotNull setTemp: Int,
-        @NotNull curTemp: Int, @NotBlank mode: String
+        @NotNull curTemp: Int, @NotBlank fanSpeed: String,
+        @NotNull needWind: Boolean
     ): R<Boolean> {
-        slaveStatusService.updateRegisteredTime(roomId)
-        slaveStatusService.updateSlaveStatus(roomId, curTemp, setTemp, Status.正常, mode)
+        slaveStatusService.updateSlaveStatus(roomId, curTemp, setTemp, Status.正常, fanSpeed)
+        if (!needWind)
+            return R.success(false)
+
         val r = masterService.contains(roomId)
         if (TEST)
             logger.info("收到来自从机的查询: {}, 查询结果: {}", roomId, r)
@@ -172,12 +173,10 @@ class SlaveController {
 
     /**
      * 获取当前从机请求费用
-     *
-     * TODO: 废弃旧有的使用 `PostMapping` 的 /slaveFee 请求 url
      */
     @CheckLogin
     @CheckWorkMode
-    @PostMapping("/slaveFee")
+    @GetMapping("/fee")
     fun slaveFee(@NotNull roomId: Long): R<List<BigDecimal>> {
         /*
          * 如果有历史和现在数据, 则将二者相加, 如果只有历史数据则返回历史数据,
@@ -197,5 +196,4 @@ class SlaveController {
             else -> R.success(listOf(BigDecimal.ZERO, BigDecimal.ZERO))
         }
     }
-
 }
