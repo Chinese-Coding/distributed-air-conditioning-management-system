@@ -1,0 +1,25 @@
+server:
+    port: 8081
+
+spring:
+    application:
+        name: slave
+
+    # 启用 Bean 懒加载, 加速启动速度
+    main:
+        lazy-initialization: true
+    # 启动虚拟线程的支持
+    threads:
+        virtual:
+            enabled: true
+springdoc:
+    api-docs:
+        path: /api-docs
+        enabled: true
+    swagger-ui:
+        # 可以通过这个 url 启动 swagger-ui 方便调试
+        path: /swagger-ui.html
+        enabled: true
+
+slave:
+    fixedRate: 1000
