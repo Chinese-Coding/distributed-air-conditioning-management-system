@@ -15,9 +15,8 @@ import java.io.IOException
 import java.math.BigDecimal
 import java.time.Duration
 import java.time.LocalDateTime
-import java.util.Collections
 import java.util.LinkedList
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.system.exitProcess
 
 private lateinit var HEATING_TEMP: List<Int>
@@ -88,6 +87,8 @@ class MasterService {
 
     private lateinit var sendAirRoomId: MutableSet<Long>
 
+    private val lock = ReentrantReadWriteLock()
+
     fun checkWorkMode(workMode: WorkMode) = this.workMode == workMode
 
 
@@ -97,33 +98,37 @@ class MasterService {
         this.workMode = WorkMode.REFRIGERATION
         this.range = REFRIGERATION_TEMP
 
-        this.requestList = Collections.synchronizedList(LinkedList())
-        this.requestDetailMap = ConcurrentHashMap()
-        this.sendAirRoomId = Collections.synchronizedSet(HashSet())
+        this.requestList = LinkedList()
+        this.requestDetailMap = HashMap()
+        this.sendAirRoomId = HashSet()
         logger.info("主机启动成功! 主机工作参数: {}, {}, {}", workMode, range, FAX_COST)
     }
 
     fun powerOff() {
         this.workMode = WorkMode.OFF
-        // 主机关机, 清空所有请求
-        for (request in requestList) {
-            // 找出对应的详细请求, 将其结束并存入数据库
-            var requestId = request.id!!
-            var requestDetail = requestDetailMap[requestId]
-            if (requestDetail != null)
-                calcFeeAndSave(requestDetail)
+        lock.writeLock().lock()
+        try {
+            // 主机关机, 清空所有请求
+            for (request in requestList) {
+                // 找出对应的详细请求, 将其结束并存入数据库
+                var requestId = request.id!!
+                var requestDetail = requestDetailMap[requestId]
+                if (requestDetail != null)
+                    calcFeeAndSave(requestDetail)
 
-            with(request) {
-                this.stopTime = LocalDateTime.now()
-                this.normalExit = false
+                with(request) {
+                    this.stopTime = LocalDateTime.now()
+                    this.normalExit = false
+                }
+                requestService.save(request)
             }
-            requestService.save(request)
+            // 其实加不加都无所谓
+            requestList.clear()
+            requestDetailMap.clear()
+            sendAirRoomId.clear()
+        } finally {
+            lock.writeLock().unlock()
         }
-        // 其实加不加都无所谓
-        requestList.clear()
-        requestDetailMap.clear()
-        sendAirRoomId.clear()
-
         logger.info("主机关闭成功!")
     }
 
@@ -146,11 +151,16 @@ class MasterService {
      * @return 返回一个包含 energy, fee 的 list
      */
     private fun calcFeeAndSave(requestId: Long): List<BigDecimal>? {
-        val requestDetail = requestDetailMap[requestId]
-        return if (requestDetail == null) null else {
-            requestDetailMap.remove(requestId)
-            requestDetail.stopTime = LocalDateTime.now()
-            calcFeeAndSave(requestDetail)
+        lock.writeLock().lock()
+        try {
+            val requestDetail = requestDetailMap[requestId]
+            return if (requestDetail == null) null else {
+                requestDetailMap.remove(requestId)
+                requestDetail.stopTime = LocalDateTime.now()
+                calcFeeAndSave(requestDetail)
+            }
+        } finally {
+            lock.writeLock().unlock()
         }
     }
 
@@ -178,7 +188,12 @@ class MasterService {
         val request = Request(roomId = roomId, userId = userId, startTime = LocalDateTime.now())
         // 先存入数据库, `id` 回填后, 再存入 `requestList`
         requestService.save(request)
-        requestList.add(request)
+        lock.writeLock().lock()
+        try {
+            requestList.add(request)
+        } finally {
+            lock.writeLock().unlock()
+        }
         return request.id!!
     }
 
@@ -193,37 +208,42 @@ class MasterService {
      * (如果没有上一次的请求, 则新建请求, 并返回 [0, 0]), 否则返回 null
      */
     fun slaveRequest(roomId: Long, newRequestDetail: RequestDetail): List<BigDecimal>? {
-        var request = requestList.find { it.roomId == roomId }
-        if (request == null)
-            return null
-        var requestId = request.id!!
-        var oldRequestDetail = requestDetailMap[requestId]
-        if (oldRequestDetail == null) {
-            if (!checkRequestTemp(newRequestDetail))
+        lock.writeLock().lock()
+        try {
+            var request = requestList.find { it.roomId == roomId }
+            if (request == null)
                 return null
-            with(newRequestDetail) {
-                this.requestId = requestId
-                this.startTime = LocalDateTime.now()
-            }
-            requestDetailMap.put(requestId, newRequestDetail)
-            return listOf(BigDecimal.ZERO, BigDecimal.ZERO)
-        } else {
-            requestDetailMap.remove(requestId)
-            if (checkRequestTemp(newRequestDetail)) {
+            var requestId = request.id!!
+            var oldRequestDetail = requestDetailMap[requestId]
+            if (oldRequestDetail == null) {
+                if (!checkRequestTemp(newRequestDetail))
+                    return null
                 with(newRequestDetail) {
                     this.requestId = requestId
                     this.startTime = LocalDateTime.now()
                 }
-                with(oldRequestDetail) {
-                    this.stopTime = LocalDateTime.now()
-                    this.stopTemp = newRequestDetail.startTemp
-                }
                 requestDetailMap.put(requestId, newRequestDetail)
-                return calcFeeAndSave(oldRequestDetail)
-            } else { // 如果原先的那个新请求的参数不合法, 则还是处理原先的那个请求
-                requestDetailMap.put(requestId, oldRequestDetail)
-                return null
+                return listOf(BigDecimal.ZERO, BigDecimal.ZERO)
+            } else {
+                requestDetailMap.remove(requestId)
+                if (checkRequestTemp(newRequestDetail)) {
+                    with(newRequestDetail) {
+                        this.requestId = requestId
+                        this.startTime = LocalDateTime.now()
+                    }
+                    with(oldRequestDetail) {
+                        this.stopTime = LocalDateTime.now()
+                        this.stopTemp = newRequestDetail.startTemp
+                    }
+                    requestDetailMap.put(requestId, newRequestDetail)
+                    return calcFeeAndSave(oldRequestDetail)
+                } else { // 如果原先的那个新请求的参数不合法, 则还是处理原先的那个请求
+                    requestDetailMap.put(requestId, oldRequestDetail)
+                    return null
+                }
             }
+        } finally {
+            lock.writeLock().lock()
         }
     }
 
@@ -237,34 +257,51 @@ class MasterService {
      */
     fun slavePowerOff(roomId: Long): List<BigDecimal>? {
         // 找出对应的 request
-        var request = requestList.find { it.roomId == roomId }
-        if (request == null)
-            return null
-        // 找出对应的详细请求, 将其结束并存入数据库
-        return calcFeeAndSave(request.id!!)
+        lock.readLock().lock()
+        try {
+            var request = requestList.find { it.roomId == roomId }
+            if (request == null)
+                return null
+            // 找出对应的详细请求, 将其结束并存入数据库
+            return calcFeeAndSave(request.id!!)
+        } finally {
+            lock.readLock().unlock()
+        }
     }
 
     /**
      * 从机注销, 将其从请求列表中移除
      */
     fun slaveLogout(roomId: Long, normalExit: Boolean = true) {
-        val index = requestList.indexOfFirst { it.roomId == roomId }
-        if (index != -1) {
-            val request = requestList.removeAt(index)
+        lock.writeLock().lock()
+        try {
+            val index = requestList.indexOfFirst { it.roomId == roomId }
+            if (index != -1) {
+                val request = requestList.removeAt(index)
 
-            // 找出对应的详细请求, 将其结束并存入数据库
-            calcFeeAndSave(request.id!!)
+                // 找出对应的详细请求, 将其结束并存入数据库
+                calcFeeAndSave(request.id!!)
 
-            with(request) {
-                this.stopTime = LocalDateTime.now()
-                this.normalExit = normalExit
-            }
-            requestService.save(request)
-        } else
-            throw IllegalArgumentException("请求关闭的roomId($roomId)不存在")
+                with(request) {
+                    this.stopTime = LocalDateTime.now()
+                    this.normalExit = normalExit
+                }
+                requestService.save(request)
+            } else
+                throw IllegalArgumentException("请求关闭的roomId($roomId)不存在")
+        } finally {
+            lock.writeLock().unlock()
+        }
     }
 
-    fun contains(roomId: Long) = sendAirRoomId.contains(roomId)
+    fun contains(roomId: Long): Boolean {
+        lock.readLock().lock()
+        try {
+            return sendAirRoomId.contains(roomId)
+        } finally {
+            lock.readLock().unlock()
+        }
+    }
 
     /**
      * 供从机和前端调用, 实时获取本次请求所需要的消耗的能量和所需支付的金额
@@ -279,18 +316,23 @@ class MasterService {
      * @return 消耗的能量和金额
      */
     fun getEnergyAndFee(roomId: Long): List<BigDecimal>? {
-        val request = requestList.firstOrNull { it.roomId == roomId }
-        if (request == null)
-            return null
-        val requestId = request.roomId!!
-        val requestDetail = requestDetailMap[requestId]
+        lock.readLock().lock()
+        try {
+            val request = requestList.firstOrNull { it.roomId == roomId }
+            if (request == null)
+                return null
+            val requestId = request.roomId!!
+            val requestDetail = requestDetailMap[requestId]
 
-        return requestDetail?.let {
-            val now = LocalDateTime.now()
-            val seconds = Duration.between(it.startTime, now).seconds
-            val minutes = (seconds / 60) + (if (seconds % 60 > 0) 1 else 0)
-            val energy = BigDecimal(minutes) * BigDecimal(FAX_COST[it.fanSpeed]!!)
-            listOf(energy, energy * BigDecimal(5))
+            return requestDetail?.let {
+                val now = LocalDateTime.now()
+                val seconds = Duration.between(it.startTime, now).seconds
+                val minutes = (seconds / 60) + (if (seconds % 60 > 0) 1 else 0)
+                val energy = BigDecimal(minutes) * BigDecimal(FAX_COST[it.fanSpeed]!!)
+                listOf(energy, energy * BigDecimal(5))
+            }
+        } finally {
+            lock.readLock().unlock()
         }
     }
 
@@ -306,25 +348,30 @@ class MasterService {
         if (workMode == WorkMode.OFF)
             return
 
-        // 每次添加之前记得清零......
-        sendAirRoomId.clear()
-        var size = requestList.size
-        if (size == 0)
-            return
-
-        var count = 0
-        repeat(size) {
-            // 调度的时候, 遍历 `requestList`, 其中一些从机可能只是开机, 但是没有详细请求.
-            var request = requestList.removeFirst()
-            requestList.addLast(request)
-            var requestId = request.id!!
-            var requestDetail = requestDetailMap[requestId]
-            if (requestDetail != null) {
-                sendAirRoomId.add(request.roomId!!)
-                count++
-            }
-            if (count == 3)
+        lock.writeLock().lock()
+        try {
+            // 每次添加之前记得清零......
+            sendAirRoomId.clear()
+            var size = requestList.size
+            if (size == 0)
                 return
+
+            var count = 0
+            repeat(size) {
+                // 调度的时候, 遍历 `requestList`, 其中一些从机可能只是开机, 但是没有详细请求.
+                var request = requestList.removeFirst()
+                requestList.addLast(request)
+                var requestId = request.id!!
+                var requestDetail = requestDetailMap[requestId]
+                if (requestDetail != null) {
+                    sendAirRoomId.add(request.roomId!!)
+                    count++
+                }
+                if (count == 3)
+                    return
+            }
+        } finally {
+            lock.writeLock().unlock()
         }
     }
 }
