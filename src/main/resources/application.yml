@@ -31,7 +31,7 @@ springdoc:
 
 master:
     fixedRate: 1000
-    pollingInterval: 500
+    pollingInterval: 5000
     EXPIRY_DURATION: 100
 
 slave:

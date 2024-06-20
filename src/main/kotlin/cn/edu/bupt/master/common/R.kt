@@ -1,6 +1,7 @@
 package cn.edu.bupt.master.common
 
 import com.fasterxml.jackson.annotation.JsonProperty
+import org.slf4j.LoggerFactory
 
 /**
  * 统一返回结果
@@ -28,6 +29,8 @@ class R<T> {
     }
 
     companion object {
+        private val logger = LoggerFactory.getLogger(javaClass)
+
         fun <T> success(obj: T): R<T> {
             var r = R<T>()
             r.data = obj
@@ -36,6 +39,7 @@ class R<T> {
         }
 
         fun <T> error(msg: String): R<T> {
+            logger.error(msg)
             var r = R<T>()
             r.msg = msg
             r.code = 0

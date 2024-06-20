@@ -1,7 +1,7 @@
 DROP
-DATABASE IF EXISTS air_conditioner_system;
+    DATABASE IF EXISTS air_conditioner_system;
 CREATE
-DATABASE air_conditioner_system;
+    DATABASE air_conditioner_system;
 -- USE DATABASE air_conditioner_system;
 
 -- 顾客
@@ -17,9 +17,9 @@ CREATE TABLE users
 DROP TABLE IF EXISTS room;
 CREATE TABLE room
 (
-    id      bigserial PRIMARY KEY NOT NULL,
-    user_id bigint,
-    inuse   boolean               NOT NULL DEFAULT FALSE
+    id      bigserial PRIMARY KEY        NOT NULL,
+    user_id bigint REFERENCES users (id) NOT NULL,
+    inuse   boolean                      NOT NULL DEFAULT FALSE
 );
 
 
@@ -27,10 +27,10 @@ CREATE TABLE room
 DROP TABLE IF EXISTS request;
 CREATE TABLE request
 (
-    id          bigserial PRIMARY KEY NOT NULL,
-    room_id     bigint                NOT NULL,
-    user_id     bigint                NOT NULL,
-    start_time  timestamp             NOT NULL,
+    id          bigserial PRIMARY KEY        NOT NULL,
+    room_id     bigint REFERENCES room (id)  NOT NULL,
+    user_id     bigint REFERENCES users (id) NOT NULL,
+    start_time  timestamp                    NOT NULL,
     stop_time   timestamp DEFAULT NULL,
     normal_exit boolean   DEFAULT NULL
 );
@@ -39,12 +39,12 @@ CREATE TABLE request
 DROP TABLE IF EXISTS request_detail;
 CREATE TABLE request_detail
 (
-    id         bigserial PRIMARY KEY NOT NULL,
-    request_id bigint                NOT NULL,
-    start_time timestamp             NOT NULL,
-    stop_time  timestamp             NOT NULL,
-    start_temp int                   NOT NULL,
-    stop_temp  int                   NOT NULL,
-    fan_speed  VARCHAR(6)            NOT NULL DEFAULT 'MEDIUM', -- 风速等级
-    total_fee  decimal(10, 2)        NOT NULL
+    id         bigserial PRIMARY KEY          NOT NULL,
+    request_id bigint REFERENCES request (id) NOT NULL,
+    start_time timestamp                      NOT NULL,
+    stop_time  timestamp                      NOT NULL,
+    start_temp int                            NOT NULL,
+    stop_temp  int                            NOT NULL,
+    fan_speed  VARCHAR(6)                     NOT NULL DEFAULT 'MEDIUM', -- 风速等级
+    total_fee  decimal(10, 2)                 NOT NULL
 );

@@ -52,7 +52,7 @@ class SlaveController {
     @CheckWorkMode
     @PostMapping("/login")
     fun login(@NotNull name: String, password: String?, @NotNull roomId: Long): R<Int> {
-        logger.info("从机请求登录({}, name={}, password={})", roomId, name, password)
+        logger.info("从机请求登录(roomId={}, name={}, password={})", roomId, name, password)
         val r = if (password == null)
             userService.login(name)
         else
@@ -64,6 +64,9 @@ class SlaveController {
             val userId = r.id!!
             val room = roomService.findById(roomId)
             if (room == null)
+                return R.error("房间不存在")
+
+            if (userId != room.userId)
                 return R.error("你不是这个房间的主人")
 
             if (room.inuse!!)

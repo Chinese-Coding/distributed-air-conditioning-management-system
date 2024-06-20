@@ -40,17 +40,20 @@ class FrontController {
      */
     @GetMapping("/powerOn")
     fun powerOn(): R<String> {
-        masterService.powerOn()
-        return R.success("启动成功")
+        if (masterService.workMode == WorkMode.OFF) {
+            masterService.powerOn()
+            return R.success("启动成功")
+        } else return R.error("主机已经启动了, 请勿重复启动")
     }
 
     /**
      * 前端-主机关机
      */
+    @CheckWorkMode
     @GetMapping("/powerOff")
     fun powerOff(): R<String> {
         masterService.powerOff()
-        return R.success("启动成功")
+        return R.success("主机关机成功")
     }
 
     @CheckWorkMode

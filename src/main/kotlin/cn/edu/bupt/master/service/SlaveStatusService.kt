@@ -3,23 +3,26 @@ package cn.edu.bupt.master.service
 import cn.edu.bupt.master.TEST
 import cn.edu.bupt.master.entity.SlaveStatus
 import cn.edu.bupt.master.entity.Status
+import jakarta.annotation.Resource
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
+import java.util.concurrent.locks.ReentrantReadWriteLock
 
 @Service
 class SlaveStatusService {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    @Autowired
+    private val lock = ReentrantReadWriteLock()
+
+    @Resource
     private lateinit var masterService: MasterService
 
-    @Autowired
+    @Resource
     private lateinit var roomRepository: RoomRepository
 
     @Value("\${master.EXPIRY_DURATION}")
@@ -28,7 +31,8 @@ class SlaveStatusService {
     private var slaveStatusMap = HashMap<Long, SlaveStatus>()
 
     fun register(roomId: Long) {
-        synchronized(slaveStatusMap) {
+        lock.writeLock().lock()
+        try {
             if (slaveStatusMap.containsKey(roomId)) {
                 var slaveStatus = slaveStatusMap[roomId]!!
                 if (slaveStatus.status == Status.离线 || slaveStatus.status == Status.关机) {
@@ -41,45 +45,45 @@ class SlaveStatusService {
                     SlaveStatus(roomId = roomId, status = Status.正常, registeredTime = LocalDateTime.now())
                 slaveStatusMap.put(roomId, slaveStatus)
             }
+        } finally {
+            lock.writeLock().unlock()
         }
     }
 
     fun unregister(roomId: Long) {
-        synchronized(slaveStatusMap) {
+        lock.writeLock().lock()
+        try {
             if (slaveStatusMap.containsKey(roomId)) {
                 var slaveStatus = slaveStatusMap[roomId]!!
                 slaveStatus.status = Status.关机
                 slaveStatus.registeredTime = LocalDateTime.now()
-                // 用户如果登出, 则需要重置费用和能量
-                slaveStatus.zero()
                 slaveStatusMap.put(roomId, slaveStatus)
             }
+        } finally {
+            lock.writeLock().unlock()
         }
     }
 
     fun isRegistered(roomId: Long): Boolean {
-        synchronized(slaveStatusMap) {
+        lock.readLock().lock()
+        try {
             return slaveStatusMap.containsKey(roomId)
+        } finally {
+            lock.readLock().unlock()
         }
     }
 
 
     fun updateEnergyAndFee(roomId: Long, energy: BigDecimal, fee: BigDecimal) {
-        synchronized(slaveStatusMap) {
+        lock.writeLock().lock()
+        try {
             if (slaveStatusMap.containsKey(roomId)) {
                 var slaveStatus = slaveStatusMap[roomId]!!
-                slaveStatus.energy += energy
-                slaveStatus.fee += fee
-                slaveStatus.registeredTime = LocalDateTime.now()
-                if (TEST)
-                    logger.info(
-                        "更新从机({}), 当前历史能量和费用为: {}, {}",
-                        roomId,
-                        slaveStatus.energy,
-                        slaveStatus.fee
-                    )
+                slaveStatus = updateEnergyAndFee(slaveStatus, energy, fee)
                 slaveStatusMap.put(roomId, slaveStatus)
             }
+        } finally {
+            lock.writeLock().unlock()
         }
     }
 
@@ -87,8 +91,9 @@ class SlaveStatusService {
      * 更新除去能量和费用以外的其他参数
      */
     fun updateSlaveStatus(roomId: Long, curTemp: Int, setTemp: Int, status: Status, fanSpeed: String) {
-        synchronized(slaveStatusMap) {
-            if (isRegistered(roomId)) {
+        lock.writeLock().lock()
+        try {
+            if (slaveStatusMap.containsKey(roomId)) {
                 // 如果存在则直接更新该对象
                 val slaveStatus = slaveStatusMap[roomId]!!
                 with(slaveStatus) {
@@ -100,21 +105,47 @@ class SlaveStatusService {
                 }
                 slaveStatusMap[roomId] = slaveStatus
             }
+        } finally {
+            lock.writeLock().unlock()
         }
+    }
+
+    /**
+     * 不加锁的更新方法
+     */
+    private fun updateEnergyAndFee(slaveStatus: SlaveStatus, energy: BigDecimal, fee: BigDecimal): SlaveStatus {
+        with(slaveStatus) {
+            slaveStatus.energy += energy
+            slaveStatus.fee += fee
+            slaveStatus.registeredTime = LocalDateTime.now()
+        }
+        if (TEST)
+            logger.info(
+                "更新从机({}), 当前历史能量和费用为: {}, {}",
+                slaveStatus.roomId,
+                slaveStatus.energy,
+                slaveStatus.fee
+            )
+        return slaveStatus
     }
 
 
     fun getSlaveStatusList(): List<SlaveStatus> {
-        synchronized(slaveStatusMap) {
+        lock.readLock().lock()
+        try {
             return ArrayList(slaveStatusMap.values)
+        } finally {
+            lock.readLock().unlock()
         }
     }
 
 
     fun getEnergyAndFee(roomId: Long): List<BigDecimal>? {
-        synchronized(slaveStatusMap) {
-            var slaveStatus = slaveStatusMap[roomId]
-            return if (slaveStatus != null) listOf(slaveStatus.energy, slaveStatus.fee) else null
+        lock.readLock().lock()
+        try {
+            return slaveStatusMap[roomId]?.let { listOf(it.energy, it.fee) }
+        } finally {
+            lock.readLock().unlock()
         }
     }
 
@@ -123,7 +154,8 @@ class SlaveStatusService {
      */
     @Scheduled(fixedRateString = "\${master.pollingInterval}")
     fun checkRegisteredId() {
-        synchronized(slaveStatusMap) {
+        lock.writeLock().lock()
+        try {
             var now = LocalDateTime.now()
 
             // 在 GPT 的建议下改为使用迭代器
@@ -141,15 +173,18 @@ class SlaveStatusService {
                     }
                     logger.error("从机 {} 超时, 离线", roomId)
                     entry.value.status = Status.离线
-                    val list = masterService.slavePowerOff(roomId)
-                    if (list != null)
-                        this.updateEnergyAndFee(roomId, list[0], list[1])
+                    // 更新从机花费和能量
+                    val energyAndFee = masterService.slavePowerOff(roomId)
+                    if (energyAndFee != null)
+                        slaveStatusMap[roomId] = updateEnergyAndFee(entry.value, energyAndFee[0], energyAndFee[1])
 
                     val room = roomRepository.findById(roomId).get()
                     room.inuse = false
                     roomRepository.save(room)
                 }
             }
+        } finally {
+            lock.writeLock().unlock()
         }
     }
 }

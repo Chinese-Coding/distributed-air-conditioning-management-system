@@ -46,7 +46,7 @@ class RequestService {
     private lateinit var requestRepository: RequestRepository
 
 
-    fun save(request: Request): Request = requestRepository.save(request)
+    fun save(request: Request) = requestRepository.save(request)
 
     /**
      * 查询房间的全部请求
@@ -56,9 +56,8 @@ class RequestService {
      *
      * @return 请求列表
      */
-    fun findAllByRoomId(roomId: Long): List<Request> {
-        return requestRepository.findAllByRoomId(roomId)
-    }
+    fun findAllByRoomId(roomId: Long) = requestRepository.findAllByRoomId(roomId)
+
 
     /**
      * 通过时间获取请求, 完成日常报表工作
@@ -96,8 +95,10 @@ class UserService {
     private lateinit var userRepository: UserRepository
 
     fun getById(id: Long): User? {
-        return userRepository.findById(id).get()
+        var r = userRepository.findById(id)
+        return if (r.isPresent) r.get() else null
     }
+
 
     fun save(user: User) = userRepository.save(user)
 
@@ -110,7 +111,8 @@ class RoomService {
     private lateinit var roomRepository: RoomRepository
 
     fun findById(id: Long): Room? {
-        return roomRepository.findById(id).get()
+        var r = roomRepository.findById(id)
+        return if (r.isPresent) r.get() else null
     }
 
     fun save(room: Room) = roomRepository.save(room)

@@ -29,7 +29,7 @@ fun init() {
         val HEATING_TEMP: List<Int>,
         val REFRIGERATION_TEMP: List<Int>,
         val FAX_COST: Map<String, Double>,
-        val EXPIRY_DURATION: Int
+        val EXPIRY_DURATION: Int,
     )
 
     // 读取 JSON 文件
@@ -53,6 +53,7 @@ fun init() {
     REFRIGERATION_TEMP = basicData.REFRIGERATION_TEMP
     FAX_COST = basicData.FAX_COST
     EXPIRY_DURATION = basicData.EXPIRY_DURATION
+    println("配置参数: HEATING_TEMP: $HEATING_TEMP\tREFRIGERATION_TEMP: $REFRIGERATION_TEMP\tFAX_COST: $FAX_COST\tEXPIRY_DURATION: $EXPIRY_DURATION")
 }
 
 @Service
@@ -75,7 +76,7 @@ class MasterService {
             when (value) {
                 WorkMode.HEATING -> this.range = HEATING_TEMP
                 WorkMode.REFRIGERATION -> this.range = REFRIGERATION_TEMP
-                WorkMode.OFF -> TODO()
+                WorkMode.OFF -> {}
             }
         }
 
@@ -91,23 +92,39 @@ class MasterService {
 
     fun checkWorkMode(workMode: WorkMode) = this.workMode == workMode
 
-
+    /**
+     * 主机开机
+     *
+     * 因为此时没有其他线程的访问, 所以不加锁了
+     */
     fun powerOn() {
-        if (workMode != WorkMode.OFF)
-            return
-        this.workMode = WorkMode.REFRIGERATION
-        this.range = REFRIGERATION_TEMP
+        lock.readLock().lock()
+        try {
+            if (workMode != WorkMode.OFF)
+                return
+        } finally {
+            lock.readLock().unlock()
+        }
+        lock.writeLock().lock()
+        try {
+            this.workMode = WorkMode.REFRIGERATION
+            this.range = REFRIGERATION_TEMP
 
-        this.requestList = LinkedList()
-        this.requestDetailMap = HashMap()
-        this.sendAirRoomId = HashSet()
-        logger.info("主机启动成功! 主机工作参数: {}, {}, {}", workMode, range, FAX_COST)
+            this.requestList = LinkedList()
+            this.requestDetailMap = HashMap()
+            this.sendAirRoomId = HashSet()
+            logger.info("主机启动成功! 主机工作参数: {}, {}, {}", workMode, range, FAX_COST)
+        } finally {
+            lock.writeLock().unlock()
+        }
+
     }
 
     fun powerOff() {
-        this.workMode = WorkMode.OFF
         lock.writeLock().lock()
+        logger.info("获得锁")
         try {
+            this.workMode = WorkMode.OFF
             // 主机关机, 清空所有请求
             for (request in requestList) {
                 // 找出对应的详细请求, 将其结束并存入数据库
@@ -126,10 +143,10 @@ class MasterService {
             requestList.clear()
             requestDetailMap.clear()
             sendAirRoomId.clear()
+            logger.info("主机关闭成功!")
         } finally {
             lock.writeLock().unlock()
         }
-        logger.info("主机关闭成功!")
     }
 
     private fun checkRequestTemp(requestDetail: RequestDetail): Boolean {
@@ -144,25 +161,6 @@ class MasterService {
                 (workMode == WorkMode.REFRIGERATION && startTemp!! > stopTemp)
     }
 
-    /**
-     * 计算一个详细请求的总花费并写入数据库
-     *
-     * @param requestId 请求 id
-     * @return 返回一个包含 energy, fee 的 list
-     */
-    private fun calcFeeAndSave(requestId: Long): List<BigDecimal>? {
-        lock.writeLock().lock()
-        try {
-            val requestDetail = requestDetailMap[requestId]
-            return if (requestDetail == null) null else {
-                requestDetailMap.remove(requestId)
-                requestDetail.stopTime = LocalDateTime.now()
-                calcFeeAndSave(requestDetail)
-            }
-        } finally {
-            lock.writeLock().unlock()
-        }
-    }
 
     /**
      * 计算一个请求的总花费并写入数据库
@@ -243,7 +241,7 @@ class MasterService {
                 }
             }
         } finally {
-            lock.writeLock().lock()
+            lock.writeLock().unlock()
         }
     }
 
@@ -262,8 +260,14 @@ class MasterService {
             var request = requestList.find { it.roomId == roomId }
             if (request == null)
                 return null
-            // 找出对应的详细请求, 将其结束并存入数据库
-            return calcFeeAndSave(request.id!!)
+            val requestDetail = requestDetailMap[request.id!!]
+            if (requestDetail == null)
+                return null
+            else {
+                requestDetailMap.remove(request.id!!)
+                requestDetail.stopTime = LocalDateTime.now()
+                return calcFeeAndSave(requestDetail)
+            }
         } finally {
             lock.readLock().unlock()
         }
@@ -278,9 +282,12 @@ class MasterService {
             val index = requestList.indexOfFirst { it.roomId == roomId }
             if (index != -1) {
                 val request = requestList.removeAt(index)
-
-                // 找出对应的详细请求, 将其结束并存入数据库
-                calcFeeAndSave(request.id!!)
+                val requestDetail = requestDetailMap[request.id!!]
+                if (requestDetail != null) {
+                    requestDetailMap.remove(request.id!!)
+                    requestDetail.stopTime = LocalDateTime.now()
+                    calcFeeAndSave(requestDetail)
+                }
 
                 with(request) {
                     this.stopTime = LocalDateTime.now()
@@ -345,8 +352,13 @@ class MasterService {
     @Scheduled(fixedRateString = "\${master.fixedRate}")
     fun schedule() {
         // 交给 spring boot 管理后, 主机没有启动(各项参数未初始化)就进行调度, 需要判断一下
-        if (workMode == WorkMode.OFF)
-            return
+        lock.readLock().lock()
+        try {
+            if (workMode == WorkMode.OFF)
+                return
+        } finally {
+            lock.readLock().unlock()
+        }
 
         lock.writeLock().lock()
         try {
