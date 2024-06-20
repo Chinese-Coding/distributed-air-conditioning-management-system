@@ -3,7 +3,6 @@ package cn.edu.bupt.slave.common
 import cn.edu.bupt.slave.service.SlaveService
 import cn.edu.bupt.slave.service.Status
 import jakarta.annotation.Resource
-import org.aspectj.lang.JoinPoint
 import org.aspectj.lang.annotation.Aspect
 import org.aspectj.lang.annotation.Before
 import org.aspectj.lang.annotation.Pointcut
@@ -15,14 +14,14 @@ import org.springframework.web.bind.annotation.ControllerAdvice
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.ResponseBody
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.client.ResourceAccessException
 import org.springframework.web.client.RestTemplate
+import java.net.ConnectException
 
 @Configuration
 class RestTemplateConfig {
     @Bean
-    fun restTemplate(): RestTemplate {
-        return RestTemplate()
-    }
+    fun restTemplate() = RestTemplate()
 }
 
 
@@ -41,7 +40,7 @@ class CheckAspect {
     fun cut() = Unit
 
     @Before("cut()")
-    fun check(joinPoint: JoinPoint) {
+    fun check() {
         if (slaveService.ROOM_ID == null)
             throw IllegalArgumentException("请求参数错误, 当前主机尚未获取到 ROOM_ID")
         if (slaveService.getStatus() == Status.OFF)
@@ -63,4 +62,10 @@ class GlobalExceptionHandler {
         var message = e.message
         return R.error(message!!)
     }
+
+    @ExceptionHandler(ConnectException::class)
+    fun exceptionHandler(e: ConnectException): R<String> = R.error("与主机连接失败")
+
+    @ExceptionHandler(ResourceAccessException::class)
+    fun exceptionHandler(e: ResourceAccessException): R<String> = R.error("与主机连接失败")
 }

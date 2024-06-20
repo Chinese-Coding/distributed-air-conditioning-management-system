@@ -5,9 +5,8 @@ import cn.edu.bupt.slave.common.R
 import cn.edu.bupt.slave.service.BASE_URL
 import cn.edu.bupt.slave.service.FanSpeed
 import cn.edu.bupt.slave.service.SlaveService
-import cn.edu.bupt.slave.service.getRequestEntity
+import cn.edu.bupt.slave.service.Status
 import jakarta.annotation.Resource
-import org.springframework.http.HttpMethod
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RestController
@@ -49,9 +48,13 @@ class FrontController {
      * 从机开机
      */
     @PostMapping("/powerOn")
-    fun powerOn() = R.success(slaveService.powerOn())
+    fun powerOn(): R<Status> {
+        if (slaveService.ROOM_ID == null)
+            throw IllegalArgumentException("请求参数错误, 当前主机尚未获取到 ROOM_ID")
+        return R.success(slaveService.powerOn())
+    }
 
-
+    @Check
     @PostMapping("/powerOff")
     fun powerOff() = R.success(slaveService.powerOff())
 
@@ -86,12 +89,9 @@ class FrontController {
 
     @Check
     @GetMapping("/fee")
-    fun fee(): R<BigDecimal> {
-        var requestEntity = getRequestEntity("roomId" to slaveService.ROOM_ID)
-        var r = restTemplate.exchange<R<*>>(
-            "${BASE_URL}/fee",
-            HttpMethod.GET,
-            requestEntity,
+    fun fee(): R<List<BigDecimal>> {
+        var r = restTemplate.getForEntity<R<*>>(
+            "${BASE_URL}/fee?roomId=${slaveService.ROOM_ID}",
             R::class.java
         ).body
         return if (r == null)
@@ -99,7 +99,7 @@ class FrontController {
         else if (r.code == 0)
             R.error("发生错误, 无法获取当前从机费用, 主机错误信息: ${r.msg}")
         else if (r.code == 1)
-            R.success(r.data!! as BigDecimal)
+            R.success(r.data!! as List<BigDecimal>)
         else
             R.error("发生错误, 无法获取当前从机费用, 主机返回状态码错误")
     }

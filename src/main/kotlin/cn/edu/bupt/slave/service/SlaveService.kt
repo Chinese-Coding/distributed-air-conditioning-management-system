@@ -5,6 +5,7 @@ import cn.edu.bupt.slave.common.R
 import com.fasterxml.jackson.databind.JsonMappingException
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import jakarta.annotation.Resource
+import org.slf4j.LoggerFactory
 import org.springframework.boot.json.JsonParseException
 import org.springframework.core.io.ClassPathResource
 import org.springframework.http.*
@@ -17,6 +18,7 @@ import java.io.IOException
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.math.abs
 import kotlin.system.exitProcess
+import org.springframework.web.client.ResourceAccessException
 
 enum class Status {
     OFF, // 手动关闭，温度不变
@@ -42,7 +44,7 @@ fun init() {
         var FAN_SPEED: Map<String, Int>,
         var CHANGE_TEMP: Int = 0,
         var NOW_TEMP: Int = 0,
-        var BASE_URL: String = ""
+        var BASE_URL: String = "",
     )
     // 读取 JSON 文件
     val mapper = jacksonObjectMapper()
@@ -65,6 +67,7 @@ fun init() {
     CHANGE_TEMP = basicData.CHANGE_TEMP
     NOW_TEMP = basicData.NOW_TEMP
     BASE_URL = basicData.BASE_URL
+    println("配置参数: FAN_SPEED: $FAN_SPEED\tCHANGE_TEMP: $CHANGE_TEMP\tNOW_TEMP: $NOW_TEMP\tBASE_URL: $BASE_URL")
 }
 
 fun getRequestEntity(vararg params: Pair<String, Any?>): HttpEntity<MultiValueMap<String, String>> {
@@ -86,6 +89,10 @@ class SlaveService {
     @Resource
     private lateinit var restTemplate: RestTemplate
 
+    private val lock = ReentrantReadWriteLock()
+
+    private val logger = LoggerFactory.getLogger(javaClass)
+
     var ROOM_ID: Long? = null
 
     private var setTemp = 3000
@@ -96,17 +103,26 @@ class SlaveService {
 
     private var wind = false
 
-    private val lock = ReentrantReadWriteLock()
-
     private var status = Status.OFF
 
+
     fun login(roomId: Long, setTemp: Int) {
-        ROOM_ID = roomId
-        this.setTemp = setTemp
+        lock.writeLock().lock()
+        try {
+            ROOM_ID = roomId
+            this.setTemp = setTemp
+        } finally {
+            lock.writeLock().unlock()
+        }
     }
 
     fun logout() {
-        ROOM_ID = null
+        lock.writeLock().lock()
+        try {
+            ROOM_ID = null
+        } finally {
+            lock.writeLock().unlock()
+        }
     }
 
     /**
@@ -115,9 +131,19 @@ class SlaveService {
      * @return 从机当前状态
      */
     fun powerOn(): Status {
-        status = Status.ON
+        lock.writeLock().lock()
+        try {
+            status = Status.ON
+        } finally {
+            lock.writeLock().unlock()
+        }
         request()
-        return status
+        lock.readLock().lock()
+        try {
+            return status
+        } finally {
+            lock.readLock().unlock()
+        }
     }
 
     /**
@@ -126,9 +152,19 @@ class SlaveService {
      * @return 从机当前状态
      */
     fun powerOff(): Status {
-        status = Status.OFF
+        lock.writeLock().lock()
+        try {
+            status = Status.OFF
+        } finally {
+            lock.writeLock().unlock()
+        }
         slaveOff()
-        return status
+        lock.readLock().lock()
+        try {
+            return status
+        } finally {
+            lock.readLock().unlock()
+        }
     }
 
     /**
@@ -217,28 +253,16 @@ class SlaveService {
         }
     }
 
-
     /**
-     * 从机向主机发送请求
+     * 从机向主机发送请求 (有锁)
      */
     private fun request(): Boolean {
-        var requestEntity: HttpEntity<MultiValueMap<String, String>>
         lock.readLock().lock()
         try {
-            requestEntity = getRequestEntity(
-                "roomId" to ROOM_ID,
-                "setTemp" to setTemp, "curTemp" to curTemp,
-                "fanSpeed" to fanSpeed
-            )
+            return request(ROOM_ID!!, curTemp, fanSpeed)
         } finally {
             lock.readLock().unlock()
         }
-        val r = restTemplate.postForObject<R<*>>(
-            "${BASE_URL}/request",
-            requestEntity,
-            R::class.java
-        )
-        return r!!.code == 1
     }
 
     private fun slaveOff(): Boolean {
@@ -253,12 +277,26 @@ class SlaveService {
     }
 
     /**
+     * 无锁 request
+     */
+    private fun request(roomId: Long, curTemp: Int, fanSpeed: FanSpeed): Boolean {
+        var requestEntity =
+            getRequestEntity("roomId" to roomId, "setTemp" to setTemp, "curTemp" to curTemp, "fanSpeed" to fanSpeed)
+        val r = restTemplate.postForObject<R<*>>(
+            "${BASE_URL}/request",
+            requestEntity,
+            R::class.java
+        )
+        return r!!.code == 1
+    }
+
+    /**
      * 向主机发送是否可以向从机送风的请求, 并发送从机当前状态
      */
-    private fun toMaster(needWind: Boolean): Boolean {
+    private fun toMaster(roomId: Long, curTemp: Int, fanSpeed: FanSpeed, needWind: Boolean): Boolean {
         var requestEntity =
             getRequestEntity(
-                "roomId" to ROOM_ID,
+                "roomId" to roomId,
                 "setTemp" to setTemp, "curTemp" to curTemp,
                 "fanSpeed" to fanSpeed, "needWind" to needWind
             )
@@ -286,6 +324,7 @@ class SlaveService {
         // 写锁
         lock.writeLock().lock()
         try {
+            // 不管空调是否启动, 室内随环境温度变换是一定的
             if (curTemp < NOW_TEMP)
                 curTemp += CHANGE_TEMP
             else if (curTemp > NOW_TEMP)
@@ -293,13 +332,17 @@ class SlaveService {
 
             if (status == Status.OFF)
                 return
-
-            wind = // 虽然 `status == Status.ON` 和 `status = Status.ON` 有些重复, 但是这样写起来代码比较简单
-                if (status == Status.ON || (status == Status.AUTO_OFF && abs(curTemp - setTemp) >= 100 && request())) {
+            wind = false
+            if (status == Status.ON)
+                wind = toMaster(ROOM_ID!!, curTemp, fanSpeed, true)
+            else if (status == Status.AUTO_OFF) {
+                if (abs(curTemp - setTemp) >= 100 && request(ROOM_ID!!, curTemp, fanSpeed)) {
                     status = Status.ON
-                    toMaster(true)
-                } else
-                    toMaster(false)
+                    wind = toMaster(ROOM_ID!!, curTemp, fanSpeed, true)
+                } else // 自动关机, 但是温差不到 1 度, 只是向主机报告一下状态
+                    wind = toMaster(ROOM_ID!!, curTemp, fanSpeed, false)
+            }
+
             if (status == Status.ON && wind) {
                 val speed = FAN_SPEED[fanSpeed.toString()]!!
                 var adjustment = if (curTemp > setTemp) -speed else speed
@@ -309,6 +352,9 @@ class SlaveService {
                     wind = false
                 }
             }
+        } catch (e: ResourceAccessException) {
+            logger.error("发生错误, 与主机通信失败: ${e.message}")
+            status = Status.OFF
         } finally {
             lock.writeLock().unlock()
         }
