@@ -114,18 +114,17 @@ class SlaveController {
     @PostMapping("/request")
     fun request(
         @NotNull roomId: Long, @NotNull setTemp: Int,
-        @NotNull curTemp: Int, @NotBlank fanSpeed: String
+        @NotNull curTemp: Int, @NotBlank fanSpeed: String,
     ): R<String> {
         logger.info("从机请求参数: {}, {}, {}, {}", roomId, setTemp, curTemp, fanSpeed)
 
-        val requestDetail = RequestDetail(id = roomId, stopTemp = setTemp, startTemp = curTemp, fanSpeed = fanSpeed)
+        val requestDetail = RequestDetail(stopTemp = setTemp, startTemp = curTemp, fanSpeed = fanSpeed)
         // 收到从机的新请求时, 记得也要更新一下从机能量和费用
         val energyAndFee = masterService.slaveRequest(roomId, requestDetail)
         return if (energyAndFee != null) {
             slaveStatusService.updateEnergyAndFee(roomId, energyAndFee[0], energyAndFee[1])
             R.success("添加请求成功")
         } else {
-            logger.error("添加请求失败")
             R.error("添加请求失败")
         }
     }
@@ -161,7 +160,7 @@ class SlaveController {
     fun wind(
         @NotNull roomId: Long, @NotNull setTemp: Int,
         @NotNull curTemp: Int, @NotBlank fanSpeed: String,
-        @NotNull needWind: Boolean
+        @NotNull needWind: Boolean,
     ): R<Boolean> {
         slaveStatusService.updateSlaveStatus(roomId, curTemp, setTemp, Status.正常, fanSpeed)
         if (!needWind)

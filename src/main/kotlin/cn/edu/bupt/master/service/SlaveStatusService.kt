@@ -30,17 +30,24 @@ class SlaveStatusService {
 
     private var slaveStatusMap = HashMap<Long, SlaveStatus>()
 
+    /**
+     * 注册指定房间 ID 的从设备状态
+     *
+     * @param roomId 要注册的从设备所在的房间ID
+     */
     fun register(roomId: Long) {
         lock.writeLock().lock()
         try {
             if (slaveStatusMap.containsKey(roomId)) {
                 var slaveStatus = slaveStatusMap[roomId]!!
+                // 确保只有在从设备状态为离线或关机时才将其状态更新为 `正常`
                 if (slaveStatus.status == Status.离线 || slaveStatus.status == Status.关机) {
                     slaveStatus.status = Status.正常
                     slaveStatus.registeredTime = LocalDateTime.now()
                     slaveStatusMap.put(roomId, slaveStatus)
                 }
             } else {
+                // 如果房间ID不存在于映射中, 则创建一个新的从设备状态, 并设置状态为正常, 注册时间为当前时间
                 var slaveStatus =
                     SlaveStatus(roomId = roomId, status = Status.正常, registeredTime = LocalDateTime.now())
                 slaveStatusMap.put(roomId, slaveStatus)
@@ -50,6 +57,13 @@ class SlaveStatusService {
         }
     }
 
+    /**
+     * 注销指定房间号的从设备
+     *
+     * 本函数用于将指定房间号的从设备状态更新为关机, 并重置相关计费和能量信息
+     *
+     * @param roomId 要取消注册的从设备所在的房间号
+     */
     fun unregister(roomId: Long) {
         lock.writeLock().lock()
         try {
@@ -57,6 +71,8 @@ class SlaveStatusService {
                 var slaveStatus = slaveStatusMap[roomId]!!
                 slaveStatus.status = Status.关机
                 slaveStatus.registeredTime = LocalDateTime.now()
+                // 用户如果登出, 则需要重置费用和能量
+                slaveStatus.zero()
                 slaveStatusMap.put(roomId, slaveStatus)
             }
         } finally {
@@ -64,6 +80,14 @@ class SlaveStatusService {
         }
     }
 
+    /**
+     * 检查指定房间号的从设备是否已注册
+     *
+     * 检查给定房间号是否存在于从设备状态映射中, 以此判断该房间号对应的从设备是否已被注册.
+     *
+     * @param roomId 要查询注册状态的从设备所在房间号
+     * @return 如果房间号对应的从设备已注册, 则返回 `true`；否则, 返回 `false`.
+     */
     fun isRegistered(roomId: Long): Boolean {
         lock.readLock().lock()
         try {
@@ -73,7 +97,13 @@ class SlaveStatusService {
         }
     }
 
-
+    /**
+     * 更新房间的能源和费用
+     *
+     * @param roomId 房间的ID, 用于标识特定的房间
+     * @param energy 要更新的能源量
+     * @param fee 要更新的费用
+     */
     fun updateEnergyAndFee(roomId: Long, energy: BigDecimal, fee: BigDecimal) {
         lock.writeLock().lock()
         try {
@@ -139,7 +169,14 @@ class SlaveStatusService {
         }
     }
 
-
+    /**
+     * 获取指定房间的能源和费用信息
+     *
+     * 返回指定房间的能源和费用列表, 如果房间不存在或能源和费用信息未设置, 则返回null
+     *
+     * @param roomId 房间的ID, 用于查找房间的能源和费用信息
+     * @return 返回一个包含能源和费用的列表, 如果找不到相关信息则返回null
+     */
     fun getEnergyAndFee(roomId: Long): List<BigDecimal>? {
         lock.readLock().lock()
         try {
@@ -176,8 +213,7 @@ class SlaveStatusService {
                     // 更新从机花费和能量
                     val energyAndFee = masterService.slavePowerOff(roomId)
                     if (energyAndFee != null)
-                        slaveStatusMap[roomId] = updateEnergyAndFee(entry.value, energyAndFee[0], energyAndFee[1])
-
+                        entry.setValue(updateEnergyAndFee(entry.value, energyAndFee[0], energyAndFee[1]))
                     val room = roomRepository.findById(roomId).get()
                     room.inuse = false
                     roomRepository.save(room)

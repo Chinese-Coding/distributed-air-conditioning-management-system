@@ -11,5 +11,8 @@
     "SLOW": 0.8,
     "MIDDLE": 1.0,
     "FAST": 1.2
-  }
+  },
+  "ENERGY_COST": 5,
+  "EXPIRY_DURATION": 6,
+  "SLAVE_NUM": 3
 }

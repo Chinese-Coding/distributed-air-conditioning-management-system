@@ -46,5 +46,6 @@ CREATE TABLE request_detail
     start_temp int                            NOT NULL,
     stop_temp  int                            NOT NULL,
     fan_speed  VARCHAR(6)                     NOT NULL DEFAULT 'MEDIUM', -- 风速等级
-    total_fee  decimal(10, 2)                 NOT NULL
+    total_fee  decimal(10, 2)                 NOT NULL,
+    check ( fan_speed in ('LOW', 'MEDIUM', 'FAST') )
 );
